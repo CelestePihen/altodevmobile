@@ -34,8 +34,10 @@ class AltoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-        debugShowCheckedModeBanner: false,
-        routerConfig: _router
+      debugShowCheckedModeBanner: false,
+      routerConfig: _router,
+      title: 'Alto',
+      theme: ThemeData(fontFamily: 'Patrick Hand'),
     );
   }
 }
