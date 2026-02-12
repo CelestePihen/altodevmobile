@@ -25,7 +25,7 @@ Use following format: `<type>: <verb> <desc>`
 
 * Variables/functions: `camelCase` (ex.: `myFunction`, `myVariable`)
 * Classes: `PascalCase` (ex.: `MyClass`)
-* Files: `kebab-case` (ex.: `home-screen.dart`)
+* Files: `snake_case` (ex.: `home_screen.dart`)
 
 ## 4. Pull Requests procedure (PR)
 
