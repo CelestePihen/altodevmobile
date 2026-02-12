@@ -10,7 +10,7 @@ class PairingService {
   PairingService._init();
 
   // POST /pairing
-  void createPairingRelation({String relationCode = "ALICE123", String userPublicKey = "pk_alice_xyz"}) async {
+  Future<void> createPairingRelation({String relationCode = "ALICE123", String userPublicKey = "pk_alice_xyz"}) async {
     try {
       await _apiClient.getDio().post('/pairing', data: {
         "relationCode": relationCode,

@@ -10,7 +10,7 @@ class ElementService {
 
   // POST /element
   /// [key] MESSAGE, COULEUR, ICONE, GPS LOCALISATION
-  void sendElement({String relationCode = "ALICE123", String type = "MESSAGE", String value = "Hello, World!"}) async {
+  Future<void> sendElement({String relationCode = "ALICE123", String type = "MESSAGE", String value = "Hello, World!"}) async {
     try {
       await _apiClient.getDio().post('/element', data: {
         "relationCode": relationCode,
