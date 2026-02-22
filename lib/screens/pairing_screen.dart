@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../widgets/qrcode/qr_display.dart';
+import '../widgets/qrcode/qr_code_display.dart';
+import '../widgets/qrcode/pairing_status_indicator.dart';
+import '../widgets/modals/error_display.dart';
 
 class InitPairingScreen extends StatefulWidget {
   const InitPairingScreen({super.key});
@@ -10,19 +13,65 @@ class InitPairingScreen extends StatefulWidget {
 }
 
 class _InitPairingScreenState extends State<InitPairingScreen> {
-  String? rsaPublicKey = '''
-  rsa-test-lol
-  ''';
-  String statusMessage = "Waiting for scan...";
-  bool isGenerating = true;
+  /// Is set to Null while QR code is being generated
+  /// Shows a spinner while waiting for the QR code to be generated
+  /// TODO [BACKEND]: Replace Future.delayed with real UUID + RSA key generation
+  /// TODO [BACKEND]: From crypto/key_generator.dart for example, generate a private RSA key and store it via flutter_secure_storage
+  String? _qrData;
+
+  /// TODO [BACKEND]: Retrieve status from GET /pairing polling (see pairing_status_indicator.dart)
+  final PairingStatus _status = PairingStatus.waiting;
+
+  /// Timer that triggers the QR code expiry modal after 2 minutes
+  Timer? _expiryTimer;
 
   @override
   void initState() {
     super.initState();
+    _startPairing();
+  }
+
+  /// Generates the QR data (mock) then starts the 2-minute expiry timer
+  Future<void> _startPairing() async {
+    _expiryTimer?.cancel();
+    setState(() => _qrData = null);
+
+    // MOCK: Simulates a 2-second QR code generation delay
+    // TODO [BACKEND]: Replace with actual key generation + UUID retrieval
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+
+    setState(() {
+      _qrData = 'mocked-uuid::mocked-rsa-public-key';
+    });
+
+    // Start the 2-minute validity timer
+    _expiryTimer = Timer(const Duration(seconds: 4), _onQrCodeExpired);
+  }
+
+  /// Called when the QR code has been displayed for 2 minutes without a scan
+  void _onQrCodeExpired() {
+    if (!mounted) return;
+    showErrorDisplay(
+      context: context,
+      type: ErrorType.timeout,
+      message:
+          'Your QR code is no longer valid for security reasons.\nPlease generate a new one.',
+      position: ModalPosition.center,
+      onRetry: () {
+        Navigator.of(context).pop(); // Dismiss modal
+        _startPairing();             // Restart: new QR code + reset timer
+      },
+      onGoBack: () {
+        Navigator.of(context).pop(); // Dismiss modal
+        context.pop();               // Go back to HomeScreen
+      },
+    );
   }
 
   @override
   void dispose() {
+    _expiryTimer?.cancel();
     super.dispose();
   }
 
@@ -61,6 +110,7 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
           child: SafeArea(
             child: Column(
               children: [
+                // -- Header --
                 Expanded(
                   flex: 1,
                   child: Center(
@@ -78,7 +128,7 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
                           ),
                         ),
                         Padding(
-                          padding: EdgeInsets.fromLTRB(40, 0, 40, 0),
+                          padding: const EdgeInsets.fromLTRB(40, 0, 40, 0),
                           child: Text(
                             'People must scan it to create a new connection with you!',
                             textAlign: TextAlign.center,
@@ -93,29 +143,25 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
                     ),
                   ),
                 ),
+                // -- QR Code or Spinner --
                 Expanded(
                   flex: 2,
                   child: Center(
-                    child: rsaPublicKey == null
+                    child: _qrData == null
                         ? const CircularProgressIndicator(color: Colors.white)
-                        : QrDisplay(data: rsaPublicKey!),
+                        : QrCodeDisplay(data: _qrData!),
                   ),
                 ),
+                // -- Status indicator --
                 Expanded(
                   flex: 1,
                   child: Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.camera_alt, color: Colors.white, size: 40),
+                        const Icon(Icons.camera_alt, color: Colors.white, size: 40),
                         const SizedBox(height: 16),
-                        Text(
-                          statusMessage,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                          ),
-                        ),
+                        PairingStatusIndicator(status: _status),
                       ],
                     ),
                   ),

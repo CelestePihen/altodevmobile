@@ -1,3 +1,4 @@
+/// Size of the buttons on the screen
 enum ButtonSize { S, M, L }
 
 extension ButtonSizeExtension on ButtonSize {

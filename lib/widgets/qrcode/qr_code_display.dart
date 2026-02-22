@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 
-class QrDisplay extends StatelessWidget {
+class QrCodeDisplay extends StatelessWidget {
   final String data;
   final double size;
 
-  const QrDisplay({super.key, required this.data, this.size = 250});
+  const QrCodeDisplay({super.key, required this.data, this.size = 250});
 
   @override
   Widget build(BuildContext context) {
