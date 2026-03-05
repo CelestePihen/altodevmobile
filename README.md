@@ -50,6 +50,7 @@ List of dependencies used for this application:
 * `basic_utils`: PEM keys manipulator
 * `flutter_secure_storage`: Secure storage for private keys
 * `dio`: HTTP client for API calls
+* `flutter_launcher_icons`: Custom app icons
 
 ## Features
 

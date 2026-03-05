@@ -2,6 +2,7 @@
 *.key
 *.pem
 .gitignore
+.idea
 
 # Miscellaneous
 *.class

@@ -53,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: SizedBox(
                             width: 200,
                             height: 200,
-                            child: const Placeholder(color: Colors.white),
+                            child: Image.asset('icon/icon.png', fit: BoxFit.contain)
                           ),
                         ),
                       ),
