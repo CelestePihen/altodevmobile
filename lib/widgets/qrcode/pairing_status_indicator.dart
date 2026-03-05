@@ -18,14 +18,14 @@ class PairingStatusIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     // Static part of the label (dots are animated separately)
     final String label = switch (status) {
-      PairingStatus.waiting   => 'Waiting for scan',
+      PairingStatus.waiting => 'Waiting for scan',
       PairingStatus.connected => 'Connection detected!',
       PairingStatus.finishing => 'Finishing',
     };
 
     // Whether the dots should be shown or not (only for waiting and finishing states)
     final bool showDots = switch (status) {
-      PairingStatus.waiting   => true,
+      PairingStatus.waiting => true,
       PairingStatus.connected => false,
       PairingStatus.finishing => true,
     };
@@ -42,11 +42,8 @@ class PairingStatusIndicator extends StatelessWidget {
             fontStyle: FontStyle.italic,
           ),
         ),
-        if (showDots)
-          AnimatedDots(color: Colors.white, fontSize: 24),
-        if (!showDots)
-          // Keeps consistent height even without dots
-          const SizedBox(height: 24),
+        if (showDots) AnimatedDots(color: Colors.white, fontSize: 24),
+        if (!showDots) const SizedBox(height: 24),
       ],
     );
   }

@@ -1,70 +1,57 @@
 import 'package:flutter/material.dart';
 
 /// Position of the modal on the screen
-enum ModalPosition { top, center, bottom }
+enum InfoModalPosition { top, center, bottom }
 
-/// Type of error - determines the icon displayed above the message
-enum ErrorType { timeout, network, unknown, permission }
-
-/// Displays an icon, a message, and up to 4 optional action buttons
+/// Displays an icon, a title, a message body, and two optional action buttons
 /// By default, only an "Ok" button is shown (closes the modal)
 ///
 /// Example:
-///   showErrorDisplay(
+///   showInfoDisplay(
 ///     context: context,
-///     type: ErrorType.timeout,
-///     message: 'Your QR code has expired for security reasons.',
-///     position: ModalPosition.center,
-///     onRetry: () { ... },
-///     onGoBack: () { ... },
+///     title: 'QR Code scanned!',
+///     message: 'UUID: ...\nPublic key: ...',
+///     position: InfoModalPosition.center,
+///     onConfirm: () { ... },
+///     onCancel: () { ... },
 ///   );
-class ErrorDisplay extends StatelessWidget {
-  final ErrorType type;
+class InfoDisplay extends StatelessWidget {
+  final String title;
   final String message;
-  final ModalPosition position;
+  final InfoModalPosition position;
 
   // Action callbacks — null means the button is not shown
-  final VoidCallback? onOk;
-  final VoidCallback? onRetry;
-  final VoidCallback? onGoBack;
+  final VoidCallback? onConfirm;
   final VoidCallback? onCancel;
 
-  const ErrorDisplay({
+  const InfoDisplay({
     super.key,
-    required this.type,
+    required this.title,
     required this.message,
-    this.position = ModalPosition.center,
-    this.onOk,
-    this.onRetry,
-    this.onGoBack,
+    this.position = InfoModalPosition.center,
+    this.onConfirm,
     this.onCancel,
   });
-
-  // Returns the icon associated to the error type
-  IconData _iconForType() {
-    return switch (type) {
-      ErrorType.timeout => Icons.access_time,
-      ErrorType.network => Icons.wifi_off,
-      ErrorType.unknown => Icons.error_outline,
-      ErrorType.permission => Icons.lock_outline,
-    };
-  }
 
   // Returns the alignment matching the desired position
   Alignment _alignmentForPosition() {
     return switch (position) {
-      ModalPosition.top => Alignment.topCenter,
-      ModalPosition.center => Alignment.center,
-      ModalPosition.bottom => Alignment.bottomCenter,
+      InfoModalPosition.top => Alignment.topCenter,
+      InfoModalPosition.center => Alignment.center,
+      InfoModalPosition.bottom => Alignment.bottomCenter,
     };
   }
 
   // Returns the padding matching the desired position
   EdgeInsets _paddingForPosition() {
     return switch (position) {
-      ModalPosition.top => const EdgeInsets.only(top: 80, left: 24, right: 24),
-      ModalPosition.center => const EdgeInsets.symmetric(horizontal: 24),
-      ModalPosition.bottom => const EdgeInsets.only(
+      InfoModalPosition.top => const EdgeInsets.only(
+        top: 80,
+        left: 24,
+        right: 24,
+      ),
+      InfoModalPosition.center => const EdgeInsets.symmetric(horizontal: 24),
+      InfoModalPosition.bottom => const EdgeInsets.only(
         bottom: 80,
         left: 24,
         right: 24,
@@ -75,8 +62,7 @@ class ErrorDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Whether at least one custom action is provided
-    final bool hasCustomActions =
-        onRetry != null || onGoBack != null || onCancel != null;
+    final bool hasCustomActions = onConfirm != null || onCancel != null;
 
     return Material(
       color: Colors.black54, // Semi-transparent backdrop
@@ -102,17 +88,42 @@ class ErrorDisplay extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // -- Icon --
-                Icon(_iconForType(), size: 48, color: const Color(0xff1976d2)),
+                const Icon(
+                  Icons.qr_code_scanner,
+                  size: 48,
+                  color: Color(0xff1976d2),
+                ),
                 const SizedBox(height: 16),
 
-                // -- Message --
+                // -- Title --
                 Text(
-                  message,
+                  title,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                     color: Colors.black87,
-                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // -- Message body --
+                // TODO [BACKEND]: Replace raw string with parsed UUID + public key fields
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xfff0f4ff),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    message,
+                    textAlign: TextAlign.left,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.black54,
+                      fontFamily: 'monospace',
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -123,27 +134,21 @@ class ErrorDisplay extends StatelessWidget {
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    // "Ok" shown only if no custom actions OR explicitly provided
-                    if (!hasCustomActions || onOk != null)
-                      _ModalButton(
+                    // "Ok" shown only if no custom actions
+                    if (!hasCustomActions)
+                      _InfoButton(
                         label: 'Ok',
                         isPrimary: true,
-                        onPressed: onOk ?? () => Navigator.of(context).pop(),
+                        onPressed: () => Navigator.of(context).pop(),
                       ),
-                    if (onRetry != null)
-                      _ModalButton(
-                        label: 'Retry',
+                    if (onConfirm != null)
+                      _InfoButton(
+                        label: 'Confirm',
                         isPrimary: true,
-                        onPressed: onRetry!,
-                      ),
-                    if (onGoBack != null)
-                      _ModalButton(
-                        label: 'Go back',
-                        isPrimary: false,
-                        onPressed: onGoBack!,
+                        onPressed: onConfirm!,
                       ),
                     if (onCancel != null)
-                      _ModalButton(
+                      _InfoButton(
                         label: 'Cancel',
                         isPrimary: false,
                         onPressed: onCancel!,
@@ -160,12 +165,12 @@ class ErrorDisplay extends StatelessWidget {
 }
 
 /// Internal button widget for the modal — primary (filled) or secondary (outlined)
-class _ModalButton extends StatelessWidget {
+class _InfoButton extends StatelessWidget {
   final String label;
   final bool isPrimary;
   final VoidCallback onPressed;
 
-  const _ModalButton({
+  const _InfoButton({
     required this.label,
     required this.isPrimary,
     required this.onPressed,
@@ -201,38 +206,34 @@ class _ModalButton extends StatelessWidget {
   }
 }
 
-/// Helper function to show [ErrorDisplay] as an overlay on top of the current screen
+/// Helper function to show [InfoDisplay] as an overlay on top of the current screen
 ///
 /// Example:
-///   showErrorDisplay(
+///   showInfoDisplay(
 ///     context: context,
-///     type: ErrorType.timeout,
-///     message: 'Your QR code has expired for security reasons.',
-///     position: ModalPosition.center,
-///     onRetry: _restartPairing,
-///     onGoBack: () => context.pop(),
+///     title: 'QR Code scanned!',
+///     message: 'UUID: ...\nPublic key: ...',
+///     position: InfoModalPosition.center,
+///     onConfirm: () { ... },
+///     onCancel: () { ... },
 ///   );
-Future<void> showErrorDisplay({
+Future<void> showInfoDisplay({
   required BuildContext context,
-  required ErrorType type,
+  required String title,
   required String message,
-  ModalPosition position = ModalPosition.center,
-  VoidCallback? onOk,
-  VoidCallback? onRetry,
-  VoidCallback? onGoBack,
+  InfoModalPosition position = InfoModalPosition.center,
+  VoidCallback? onConfirm,
   VoidCallback? onCancel,
 }) {
   return showGeneralDialog(
     context: context,
     barrierDismissible: false,
-    barrierColor: Colors.transparent, // ErrorDisplay handles its own backdrop
-    pageBuilder: (_, __, ___) => ErrorDisplay(
-      type: type,
+    barrierColor: Colors.transparent, // InfoDisplay handles its own backdrop
+    pageBuilder: (_, __, ___) => InfoDisplay(
+      title: title,
       message: message,
       position: position,
-      onOk: onOk,
-      onRetry: onRetry,
-      onGoBack: onGoBack,
+      onConfirm: onConfirm,
       onCancel: onCancel,
     ),
   );

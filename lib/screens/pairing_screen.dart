@@ -60,11 +60,11 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
       position: ModalPosition.center,
       onRetry: () {
         Navigator.of(context).pop(); // Dismiss modal
-        _startPairing();             // Restart: new QR code + reset timer
+        _startPairing(); // Restart: new QR code + reset timer
       },
       onGoBack: () {
         Navigator.of(context).pop(); // Dismiss modal
-        context.pop();               // Go back to HomeScreen
+        context.pop(); // Go back to HomeScreen
       },
     );
   }
@@ -159,7 +159,11 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.camera_alt, color: Colors.white, size: 40),
+                        const Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 40,
+                        ),
                         const SizedBox(height: 16),
                         PairingStatusIndicator(status: _status),
                       ],

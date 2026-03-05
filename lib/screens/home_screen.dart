@@ -74,7 +74,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       PrimaryButton(
                         text: 'Scan a QR code',
-                        onPressed: () {},
+                        onPressed: () {
+                          _onScanButtonPressed();
+                        },
                         icon: Icons.qr_code_scanner,
                         size: ButtonSize.L,
                       ),
@@ -82,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       SecondaryButton(
                         text: 'Create a connection',
                         onPressed: () {
-                          _onScanButtonPressed();
+                          _onConnectionButtonPressed();
                         },
                         icon: Icons.people,
                         size: ButtonSize.L,
@@ -110,6 +112,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onScanButtonPressed() {
+    context.push('/scan');
+  }
+
+  void _onConnectionButtonPressed() {
     context.push('/pairing');
   }
 }

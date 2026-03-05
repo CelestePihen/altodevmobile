@@ -27,17 +27,18 @@ class _AnimatedDotsState extends State<AnimatedDots>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    )..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          setState(() {
-            _dotCount = (_dotCount + 1) % 4; // cycles: 0 → 1 → 2 → 3 → 0
-          });
-          _controller.forward(from: 0);
-        }
-      });
+    _controller =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 500),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            setState(() {
+              _dotCount = (_dotCount + 1) % 4; // cycles: 0 → 1 → 2 → 3 → 0
+            });
+            _controller.forward(from: 0);
+          }
+        });
 
     _controller.forward();
   }

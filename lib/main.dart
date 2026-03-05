@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:altodevmobile/screens/home_screen.dart';
 import 'package:altodevmobile/screens/pairing_screen.dart';
+import 'package:altodevmobile/screens/scanning_screen.dart';
 
 void main() {
   runApp(ProviderScope(child: const AltoApp()));
@@ -22,6 +23,12 @@ final GoRouter _router = GoRouter(
       path: '/pairing',
       builder: (BuildContext context, GoRouterState state) {
         return const InitPairingScreen();
+      },
+    ),
+    GoRoute(
+      path: '/scan',
+      builder: (BuildContext context, GoRouterState state) {
+        return const ScanPairingScreen();
       },
     ),
   ],
