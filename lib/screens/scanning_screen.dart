@@ -4,14 +4,19 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../widgets/qrcode/scanning_status_indicator.dart';
 import '../widgets/modals/info_display.dart';
 
+// ScanPairingScreen class:
+// StatefulWidget means it reacts to an user's taps/inputs
 class ScanPairingScreen extends StatefulWidget {
-  const ScanPairingScreen({super.key});
+  const ScanPairingScreen({super.key}); // Constructor
 
   @override
   State<ScanPairingScreen> createState() => _ScanPairingScreenState();
 }
 
+// _ScanPairingScreenState class:
+// It holds the state of the ScanPairingScreen
 class _ScanPairingScreenState extends State<ScanPairingScreen> {
+  /// Sets up the camera controller facing back
   final MobileScannerController _cameraController = MobileScannerController(
     facing: CameraFacing.back,
   );
@@ -21,6 +26,7 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
   /// Prevents the modal from being shown multiple times for the same scan
   bool _hasScanned = false;
 
+  // Destructor
   @override
   void dispose() {
     _cameraController.dispose();
@@ -61,6 +67,7 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
     });
   }
 
+  /// Shows a modal with the scanned data
   void _showScannedDataModal(String rawValue) {
     showInfoDisplay(
       context: context,
@@ -69,13 +76,13 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
       message: rawValue,
       position: InfoModalPosition.center,
       onConfirm: () {
-        Navigator.of(context).pop(); // Dismiss modal
+        Navigator.of(context).pop(); // Dismisses modal
         // TODO [BACKEND]: Trigger the pairing confirmation call here
         // TODO [BACKEND]: Navigate to relation screen on success
       },
       onCancel: () {
-        Navigator.of(context).pop(); // Dismiss modal
-        _resetScan(); // Allow rescanning
+        Navigator.of(context).pop(); // Dismisses modal
+        _resetScan(); // Allows rescanning
       },
     );
   }
@@ -88,11 +95,14 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
     });
   }
 
+  // Build method:
+  // It renders the ScanPairingScreen
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
+        // -- Top --
         backgroundColor: Colors.transparent,
         elevation: 0,
         leadingWidth: 140,
@@ -107,8 +117,10 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
       ),
       body: Material(
         child: Container(
+          // -- Background --
           width: double.infinity,
           decoration: const BoxDecoration(
+            // -- Background gradient --
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomCenter,
@@ -198,7 +210,6 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
                     ),
                   ),
                 ),
-
                 // -- Status indicator --
                 Expanded(
                   flex: 1,

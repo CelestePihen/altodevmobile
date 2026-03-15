@@ -5,13 +5,17 @@ import '../widgets/qrcode/qr_code_display.dart';
 import '../widgets/qrcode/pairing_status_indicator.dart';
 import '../widgets/modals/error_display.dart';
 
+// InitPairingScreen class:
+// StatefulWidget means it reacts to an user's taps/inputs
 class InitPairingScreen extends StatefulWidget {
-  const InitPairingScreen({super.key});
+  const InitPairingScreen({super.key}); // Constructor
 
   @override
   State<InitPairingScreen> createState() => _InitPairingScreenState();
 }
 
+// _InitPairingScreenState class:
+// It holds the state of the InitPairingScreen
 class _InitPairingScreenState extends State<InitPairingScreen> {
   /// Is set to Null while QR code is being generated
   /// Shows a spinner while waiting for the QR code to be generated
@@ -25,6 +29,7 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
   /// Timer that triggers the QR code expiry modal after 2 minutes
   Timer? _expiryTimer;
 
+  // Constructor
   @override
   void initState() {
     super.initState();
@@ -46,6 +51,7 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
     });
 
     // Start the 2-minute validity timer
+    // TODO [BACKEND]: Replace with an actual 2-minute timer
     _expiryTimer = Timer(const Duration(seconds: 4), _onQrCodeExpired);
   }
 
@@ -69,17 +75,21 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
     );
   }
 
+  // Destructor
   @override
   void dispose() {
     _expiryTimer?.cancel();
     super.dispose();
   }
 
+  // Build method:
+  // It renders the InitPairingScreen
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
+        // -- Top --
         backgroundColor: Colors.transparent,
         elevation: 0,
         leadingWidth: 140,
@@ -94,8 +104,10 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
       ),
       body: Material(
         child: Container(
+          // -- Background --
           width: double.infinity,
           decoration: const BoxDecoration(
+            // -- Background gradient --
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomCenter,
