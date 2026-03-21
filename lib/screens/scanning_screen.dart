@@ -1,6 +1,17 @@
+import 'dart:async';
+
+import 'package:altodevmobile/crypto/key_storage.dart';
+import 'package:altodevmobile/crypto/relationship_keys.dart';
+import 'package:altodevmobile/models/qr_scan_data.dart';
+import 'package:altodevmobile/services/pairing_service.dart';
+import 'package:altodevmobile/widgets/modals/error_display.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:uuid/uuid.dart';
+import '../crypto/relation_storage.dart';
+import '../models/relation_session.dart';
 import '../widgets/qrcode/scanning_status_indicator.dart';
 import '../widgets/modals/info_display.dart';
 
@@ -26,10 +37,20 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
   /// Prevents the modal from being shown multiple times for the same scan
   bool _hasScanned = false;
 
+  Timer? _statusPollingTimer;
+  String? _relationCode;
+  bool _isPolling = false;
+
+  String? _pendingMyRelationCode;
+  String? _pendingPeerRelationCode;
+  String? _pendingMyPrivateKeyPem;
+  String? _pendingPeerPublicKeyPem;
+
   // Destructor
   @override
   void dispose() {
     _cameraController.dispose();
+    _statusPollingTimer?.cancel();
     super.dispose();
   }
 
@@ -60,31 +81,260 @@ class _ScanPairingScreenState extends State<ScanPairingScreen> {
       if (!mounted) return;
       setState(() => _status = ScanningStatus.validQrCode);
 
-      // TODO [BACKEND]: Validate rawValue format (expected: uuid::publicKey or JSON)
-      // TODO [BACKEND]: Parse rawValue into a structured model (see models/)
-      // TODO [BACKEND]: If invalid format, show ErrorDisplay instead of InfoDisplay
       _showScannedDataModal(rawValue);
     });
   }
 
   /// Shows a modal with the scanned data
   void _showScannedDataModal(String rawValue) {
+    QrScanData? scanData;
+    String? errorMessage;
+
+    try {
+      scanData = QrScanData.fromJson(rawValue);
+    } catch (e) {
+      errorMessage = 'Invalid QR code format. Please try again.';
+    }
+
+    if (scanData == null) {
+      // parsing error
+      showErrorDisplay(context: context,
+        type: ErrorType.unknown,
+        message: errorMessage ?? "Could not parse QR code",
+        onRetry: () {
+          Navigator.of(context).pop();
+          _resetScan();
+        },
+        onGoBack: () {
+          Navigator.of(context).pop();
+          _onBackButtonPressed();
+        },
+      );
+      return;
+    }
+
     showInfoDisplay(
       context: context,
       title: 'QR Code scanned!',
-      // TODO [BACKEND]: Replace rawValue display with parsed UUID + public key
-      message: rawValue,
+      message: 'Relation ${scanData.relationCode}',
       position: InfoModalPosition.center,
       onConfirm: () {
         Navigator.of(context).pop(); // Dismisses modal
-        // TODO [BACKEND]: Trigger the pairing confirmation call here
-        // TODO [BACKEND]: Navigate to relation screen on success
+        _triggerPairingConfirmation(scanData!); // Proceeds to pairing confirmation
       },
       onCancel: () {
         Navigator.of(context).pop(); // Dismisses modal
         _resetScan(); // Allows rescanning
       },
     );
+  }
+
+  Future<void> _triggerPairingConfirmation(QrScanData scanData) async {
+    bool loadingShown = false;
+
+    void closeLoading() {
+      if (!mounted || !loadingShown) return;
+      Navigator.of(context).pop();
+      loadingShown = false;
+    }
+
+    try {
+      if (!mounted) return;
+
+      loadingShown = true;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+
+      final keyPair = generateRelationshipRsaKeyPair();
+
+      final relationCodeB = Uuid().v4().toString();
+
+      final response = await PairingService.instance.matchRelation(
+        relationCodeA: scanData.relationCode,
+        relationCodeB: relationCodeB,
+        publicKeyB: keyPair.publicKeyPem,
+      );
+
+      closeLoading();
+      if (!mounted) return;
+
+      if (response.isEmpty) {
+        showErrorDisplay(
+          context: context,
+          type: ErrorType.unknown,
+          message: 'Failed to connect to the server. Please try again.',
+          onRetry: () {
+            Navigator.of(context).pop();
+            _resetScan();
+          },
+          onGoBack: () {
+            Navigator.of(context).pop();
+            _onBackButtonPressed();
+          },
+        );
+        return;
+      }
+
+      final returnedRelationCodeA = (response['relationCodeA'] ?? '').trim();
+      final publicKeyA = (response['publicKeyA'] ?? '').trim();
+
+      if (returnedRelationCodeA.isEmpty || publicKeyA.isEmpty) {
+        showErrorDisplay(
+          context: context,
+          type: ErrorType.unknown,
+          message: 'Server returned an invalid pairing payload.',
+          onRetry: () {
+            Navigator.of(context).pop();
+            _resetScan();
+          },
+          onGoBack: () {
+            Navigator.of(context).pop();
+            _onBackButtonPressed();
+          },
+        );
+        return;
+      }
+
+      if (returnedRelationCodeA != scanData.relationCode) {
+        showErrorDisplay(
+          context: context,
+          type: ErrorType.unknown,
+          message: 'Pairing mismatch detected. Please scan again.',
+          onRetry: () {
+            Navigator.of(context).pop();
+            _resetScan();
+          },
+          onGoBack: () {
+            Navigator.of(context).pop();
+            _onBackButtonPressed();
+          },
+        );
+        return;
+      }
+
+      _pendingMyRelationCode = relationCodeB;
+      _pendingPeerRelationCode = returnedRelationCodeA;
+      _pendingMyPrivateKeyPem = keyPair.privateKeyPem;
+      _pendingPeerPublicKeyPem = publicKeyA;
+
+      final storage = RelationshipKeyStorage(const FlutterSecureStorage());
+      await storage.saveKeyPair(
+        relationCodeB,
+        publicKeyPem: keyPair.publicKeyPem,
+        privateKeyPem: keyPair.privateKeyPem,
+      );
+
+      if (!mounted) return;
+
+      _relationCode = scanData.relationCode;
+      _startStatusPolling();
+    } catch (e) {
+      closeLoading();
+      if (!mounted) return;
+
+      showErrorDisplay(
+        context: context,
+        type: ErrorType.unknown,
+        message: 'Pairing failed: $e\nPlease try again.',
+        position: ModalPosition.center,
+        onRetry: () {
+          Navigator.of(context).pop();
+          _triggerPairingConfirmation(scanData);
+        },
+        onGoBack: () {
+          Navigator.of(context).pop();
+          _resetScan();
+        },
+      );
+    }
+  }
+
+  void _startStatusPolling() {
+    _statusPollingTimer?.cancel();
+    _pollStatus();
+
+    _statusPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollStatus();
+    });
+  }
+
+  Future<void> _pollStatus() async {
+    if (!mounted || _relationCode == null || _isPolling) return;
+    _isPolling = true;
+
+    try {
+      final raw = await PairingService.instance.getStatusRelation(
+        relationCode: _relationCode!,
+      );
+      final status = raw.trim().toLowerCase();
+
+      if (status == 'not_found') {
+        _statusPollingTimer?.cancel();
+        if (!mounted) return;
+        showErrorDisplay(
+          context: context,
+          type: ErrorType.unknown,
+          message: 'Pairing not found. Please scan again.',
+          onRetry: () {
+            Navigator.of(context).pop();
+            _resetScan();
+          },
+          onGoBack: () {
+            Navigator.of(context).pop();
+            _onBackButtonPressed();
+          },
+        );
+        return;
+      }
+
+
+      if (status == 'finalized') {
+        _statusPollingTimer?.cancel();
+
+        final myCode = _pendingMyRelationCode;
+        final peerCode = _pendingPeerRelationCode;
+        final myPriv = _pendingMyPrivateKeyPem;
+        final peerPub = _pendingPeerPublicKeyPem;
+
+        if (myCode == null || peerCode == null || myPriv == null || peerPub == null) {
+          if (!mounted) return;
+          showErrorDisplay(
+            context: context,
+            type: ErrorType.unknown,
+            message: 'Missing relation session data. Please scan again.',
+            onRetry: () {
+              Navigator.of(context).pop();
+              _resetScan();
+            },
+            onGoBack: () {
+              Navigator.of(context).pop();
+              _onBackButtonPressed();
+            },
+          );
+          return;
+        }
+
+        final relationStorage = RelationStorage(const FlutterSecureStorage());
+        await relationStorage.saveActiveSession(
+          RelationSession(
+            myRelationCode: myCode,
+            peerRelationCode: peerCode,
+            myPrivateKeyPem: myPriv,
+            peerPublicKeyPem: peerPub,
+          ),
+        );
+
+        if (mounted) context.go('/relation');
+      }
+
+    } finally {
+      _isPolling = false;
+    }
   }
 
   /// Resets the scan state to allow scanning a new QR code

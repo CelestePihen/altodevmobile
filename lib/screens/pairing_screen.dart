@@ -1,6 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
+import '../crypto/key_storage.dart';
+import '../crypto/relation_storage.dart';
+import '../crypto/relationship_keys.dart';
+import '../models/relation_session.dart';
+import '../services/pairing_service.dart';
 import '../widgets/qrcode/qr_code_display.dart';
 import '../widgets/qrcode/pairing_status_indicator.dart';
 import '../widgets/modals/error_display.dart';
@@ -19,15 +27,14 @@ class InitPairingScreen extends StatefulWidget {
 class _InitPairingScreenState extends State<InitPairingScreen> {
   /// Is set to Null while QR code is being generated
   /// Shows a spinner while waiting for the QR code to be generated
-  /// TODO [BACKEND]: Replace Future.delayed with real UUID + RSA key generation
-  /// TODO [BACKEND]: From crypto/key_generator.dart for example, generate a private RSA key and store it via flutter_secure_storage
   String? _qrData;
 
-  /// TODO [BACKEND]: Retrieve status from GET /pairing polling (see pairing_status_indicator.dart)
-  final PairingStatus _status = PairingStatus.waiting;
-
-  /// Timer that triggers the QR code expiry modal after 2 minutes
+  PairingStatus _status = PairingStatus.waiting;
   Timer? _expiryTimer;
+  Timer? _statusPollingTimer;
+  String? _relationCode;
+
+  bool _isFinalizing = false;
 
   // Constructor
   @override
@@ -36,23 +43,155 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
     _startPairing();
   }
 
-  /// Generates the QR data (mock) then starts the 2-minute expiry timer
+  void _startStatusPolling() {
+    _statusPollingTimer?.cancel();
+
+    _pollPairingStatus();
+
+    _statusPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollPairingStatus();
+    });
+  }
+
+  Future<void> _pollPairingStatus() async {
+    if (!mounted || _relationCode == null) return;
+    
+    final rawStatus = await PairingService.instance.getStatusRelation(relationCode: _relationCode!);
+
+    final nextStatus = _rawStatusToPairingStatus(rawStatus);
+    if (nextStatus == null) return;
+
+    if (!mounted) return;
+    if (nextStatus != _status) {
+      setState(() {
+        _status = nextStatus;
+      });
+    }
+
+    // dès qu'un scan est détecté
+    if (nextStatus != PairingStatus.waiting) {
+      _expiryTimer?.cancel();
+    }
+
+    if (nextStatus == PairingStatus.connected) {
+      _statusPollingTimer?.cancel();
+      await _finalize();
+      return;
+    }
+
+    // stop polling
+    if (nextStatus == PairingStatus.finishing) {
+      _statusPollingTimer?.cancel();
+      if (mounted) context.go('/relation');
+    }
+  }
+
+  Future<void> _finalize() async {
+    if (!mounted || _relationCode == null || _isFinalizing) return;
+    _isFinalizing = true;
+
+    try {
+      final response = await PairingService.instance.finalizeRelation(
+        relationCode: _relationCode!
+      );
+
+      if (!mounted) return;
+
+      if (response.isEmpty) {
+        _isFinalizing = false;
+        _startStatusPolling();
+        return;
+      }
+
+      final peerRelationCode = (response['relationCodeB'] ?? '').trim();
+      final peerPublicKeyPem = (response['publicKeyB'] ?? '').trim();
+
+      if (peerRelationCode.isEmpty || peerPublicKeyPem.isEmpty) {
+        _isFinalizing = false;
+        _startStatusPolling();
+        return;
+      }
+
+      final keyStorage = RelationshipKeyStorage(const FlutterSecureStorage());
+      final myPrivateKeyPem = await keyStorage.readPrivateKeyPem(_relationCode!);
+
+      if (myPrivateKeyPem == null || myPrivateKeyPem.trim().isEmpty) {
+        _isFinalizing = false;
+        _startStatusPolling();
+        return;
+      }
+
+      final relationStorage = RelationStorage(const FlutterSecureStorage());
+      await relationStorage.saveActiveSession(
+        RelationSession(
+          myRelationCode: _relationCode!,
+          peerRelationCode: peerRelationCode,
+          myPrivateKeyPem: myPrivateKeyPem,
+          peerPublicKeyPem: peerPublicKeyPem,
+        ),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _status = PairingStatus.finishing;
+      });
+
+      context.go('/relation');
+    } finally {
+      _isFinalizing = false;
+    }
+  }
+
+  PairingStatus? _rawStatusToPairingStatus(String rawStatus) {
+    switch ((rawStatus).trim().toLowerCase()) {
+      case 'waiting':
+        return PairingStatus.waiting;
+      case 'completed':
+        return PairingStatus.connected;
+      case 'finalized':
+        return PairingStatus.finishing;
+      default:
+        return null;
+    }
+  }
+
+  /// Generates the QR data then starts the 2-minute expiry timer
   Future<void> _startPairing() async {
     _expiryTimer?.cancel();
-    setState(() => _qrData = null);
+    _statusPollingTimer?.cancel();
+    setState(() {
+      _qrData = null;
+      _status = PairingStatus.waiting;
+    });
 
-    // MOCK: Simulates a 2-second QR code generation delay
-    // TODO [BACKEND]: Replace with actual key generation + UUID retrieval
-    await Future.delayed(const Duration(seconds: 2));
+    final relationShipKeyPair = generateRelationshipRsaKeyPair();
+
+    final relationCode = Uuid().v4();
+    _relationCode = relationCode.toString();
+
+    await PairingService.instance.createPairingRelation(
+      relationCode: _relationCode!,
+      userPublicKey: relationShipKeyPair.publicKeyPem,
+    );
+
+    final storage = RelationshipKeyStorage(const FlutterSecureStorage());
+    await storage.saveKeyPair(
+        relationCode.toString(), publicKeyPem: relationShipKeyPair.publicKeyPem,
+        privateKeyPem: relationShipKeyPair.privateKeyPem);
+
     if (!mounted) return;
 
     setState(() {
-      _qrData = 'mocked-uuid::mocked-rsa-public-key';
+      _qrData = jsonEncode({
+        'relationCode': relationCode,
+        'publicKey': relationShipKeyPair.publicKeyPem,
+      });
     });
 
     // Start the 2-minute validity timer
-    // TODO [BACKEND]: Replace with an actual 2-minute timer
-    _expiryTimer = Timer(const Duration(seconds: 4), _onQrCodeExpired);
+    _expiryTimer = Timer(const Duration(minutes: 2), _onQrCodeExpired);
+    _startStatusPolling();
   }
 
   /// Called when the QR code has been displayed for 2 minutes without a scan
@@ -79,6 +218,7 @@ class _InitPairingScreenState extends State<InitPairingScreen> {
   @override
   void dispose() {
     _expiryTimer?.cancel();
+    _statusPollingTimer?.cancel();
     super.dispose();
   }
 
