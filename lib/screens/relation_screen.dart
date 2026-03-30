@@ -1,6 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+
+import '../crypto/relation_storage.dart';
+import '../crypto/rsa_crypto.dart';
+import '../models/relation_session.dart';
+import '../services/element_service.dart';
 
 // RelationScreen class:
 // StatefulWidget means it reacts to an user's taps/inputs
@@ -20,83 +28,223 @@ class _RelationScreenState extends State<RelationScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _messagesScrollController = ScrollController();
 
-  /// MOCK: Simulates a list of contacts to interact with
-  final List<_MockContact> _contacts = <_MockContact>[
-    const _MockContact(id: 'alice', name: 'Alice'),
-    const _MockContact(id: 'bob', name: 'Bob'),
-  ];
+  final RelationStorage _relationStorage = RelationStorage(const FlutterSecureStorage());
 
-  /// Maps a contact ID to a list of messages sent to that contact
-  /// The 'late' keyword means it will be initialized later
-  late final Map<String, List<_MockMessage>> _messagesByContact;
-  late String
-  _selectedContactId; // For now, we don't know the current selected contact!
+  final Map<String, List<_ChatMessage>> _messagesByContact =
+      <String, List<_ChatMessage>>{};
+  final Map<String, String> _lastIncomingFingerprintByContact =
+      <String, String>{};
+
+  List<RelationSession> _sessions = <RelationSession>[];
+  String? _selectedContactId;
+  bool _isLoadingSessions = true;
+  bool _isSending = false;
+  bool _isPolling = false;
+
+  Timer? _incomingPollingTimer;
 
   /// Gets if the user can send a message (i.e. if the message input is not empty)
-  /// The 'get' keyword means it is a getter anonymous function
-  bool get _canSend => _messageController.text.trim().isNotEmpty;
+  bool get _canSend {
+    return !_isLoadingSessions &&
+        !_isSending &&
+        _selectedSession != null &&
+        _messageController.text.trim().isNotEmpty;
+  }
 
-  /// Gets the current selected contact
-  _MockContact get _selectedContact =>
-      _contacts.firstWhere((contact) => contact.id == _selectedContactId);
+  /// Gets the current selected session
+  RelationSession? get _selectedSession {
+    final selectedId = _selectedContactId;
+    if (selectedId == null) return null;
+    for (final session in _sessions) {
+      if (session.myRelationCode == selectedId) {
+        return session;
+      }
+    }
+    return null;
+  }
 
   /// Gets the list of messages sent to the current selected contact
-  List<_MockMessage> get _selectedMessages =>
-      _messagesByContact[_selectedContactId] ?? <_MockMessage>[];
+  List<_ChatMessage> get _selectedMessages {
+    final selectedId = _selectedContactId;
+    if (selectedId == null) return <_ChatMessage>[];
+    return _messagesByContact[selectedId] ?? <_ChatMessage>[];
+  }
 
   // Constructor
   @override
   void initState() {
     super.initState();
-    _selectedContactId = _contacts
-        .first
-        .id; // Sets the contact ID to the first contact in the list
-    // MOCK: Simulates a list of messages sent to each contact
-    _messagesByContact = <String, List<_MockMessage>>{
-      'alice': <_MockMessage>[
-        _MockMessage(
-          contactId: 'alice',
-          text: 'This is a test!',
-          timestamp: DateTime.now().subtract(const Duration(minutes: 38)),
-          isOutgoing: false,
-        ),
-        _MockMessage(
-          contactId: 'alice',
-          text: 'Sending you an anwser right now.',
-          timestamp: DateTime.now().subtract(const Duration(minutes: 36)),
-          isOutgoing: true,
-        ),
-      ],
-      'bob': <_MockMessage>[
-        _MockMessage(
-          contactId: 'bob',
-          text: 'Hello, I am using Alto too!',
-          timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-          isOutgoing: false,
-        ),
-      ],
-    };
 
     _messageController.addListener(() {
+      if (!mounted) return;
       setState(() {
         // Rebuild to enable/disable send button based on current input.
       });
     });
+
+    _loadSessionsAndStart();
   }
 
   // Destructor:
   @override
   void dispose() {
+    _incomingPollingTimer?.cancel();
     _messageController.dispose();
     _messagesScrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSessionsAndStart() async {
+    final sessions = await _relationStorage.readAllSessions();
+    final active = await _relationStorage.readActiveSession();
+
+    if (!mounted) return;
+
+    final String? selectedId = active?.myRelationCode ??
+        (sessions.isNotEmpty ? sessions.first.myRelationCode : null);
+
+    setState(() {
+      _sessions = sessions;
+      _selectedContactId = selectedId;
+      _isLoadingSessions = false;
+    });
+
+    _startPollingForSelectedContact();
+  }
+
+  void _startPollingForSelectedContact() {
+    _incomingPollingTimer?.cancel();
+    _pollIncomingElement();
+    _incomingPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollIncomingElement();
+    });
+  }
+
+  Future<void> _pollIncomingElement() async {
+    final session = _selectedSession;
+    if (!mounted || session == null || _isPolling) return;
+
+    _isPolling = true;
+    try {
+      final element = await ElementService.instance.getElement(
+        relationCode: session.myRelationCode,
+      );
+
+      if (!mounted || element.isEmpty) return;
+
+      final key = (element['key'] ?? '').trim().toUpperCase();
+      final encryptedValue = (element['value'] ?? '').trim();
+      final creationDate = (element['creationDate'] ?? '').trim();
+
+      if (key != 'MESSAGE' || encryptedValue.isEmpty) {
+        return;
+      }
+
+      final contactId = session.myRelationCode;
+      final fingerprint = '$creationDate|$encryptedValue';
+      if (_lastIncomingFingerprintByContact[contactId] == fingerprint) {
+        return;
+      }
+
+      String clearText;
+      try {
+        clearText = rsaDecryptFromBase64(
+          myPrivateKeyPem: session.myPrivateKeyPem,
+          ciphertextB64: encryptedValue,
+        );
+      } catch (_) {
+        return;
+      }
+
+      setState(() {
+        _lastIncomingFingerprintByContact[contactId] = fingerprint;
+        _messagesByContact.putIfAbsent(contactId, () => <_ChatMessage>[]);
+        _messagesByContact[contactId]!.add(
+          _ChatMessage(
+            contactId: contactId,
+            text: clearText,
+            timestamp: DateTime.now(),
+            isOutgoing: false,
+          ),
+        );
+      });
+
+      _scrollToLatestMessage();
+    } finally {
+      _isPolling = false;
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    final session = _selectedSession;
+    final selectedId = _selectedContactId;
+    final text = _messageController.text.trim();
+
+    if (session == null || selectedId == null || text.isEmpty || _isSending) {
+      return;
+    }
+
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      final encrypted = rsaEncryptToBase64(
+        recipientPublicKeyPem: session.peerPublicKeyPem,
+        plaintext: text,
+      );
+
+      // Backend behavior currently expects the peer relation code inbox.
+      await ElementService.instance.sendElement(
+        relationCode: session.peerRelationCode,
+        type: 'MESSAGE',
+        value: encrypted,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _messagesByContact.putIfAbsent(selectedId, () => <_ChatMessage>[]);
+        _messagesByContact[selectedId]!.add(
+          _ChatMessage(
+            contactId: selectedId,
+            text: text,
+            timestamp: DateTime.now(),
+            isOutgoing: true,
+          ),
+        );
+        _messageController.clear();
+      });
+
+      _scrollToLatestMessage();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
+    }
+  }
+
+  /// Scrolls to the latest message
+  void _scrollToLatestMessage() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_messagesScrollController.hasClients) {
+        return;
+      }
+      _messagesScrollController.animateTo(
+        _messagesScrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   // Build method:
   // It renders the RelationScreen
   @override
   Widget build(BuildContext context) {
-    final List<_MockMessage> messages = _selectedMessages;
+    final List<_ChatMessage> messages = _selectedMessages;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -115,48 +263,84 @@ class _RelationScreenState extends State<RelationScreen> {
         ),
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // -- Contact selector --
-            _buildContactSelector(),
-            // -- Selected user info --
-            _buildSelectedUserInfo(),
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                color: Colors.grey.shade100, // Background color
-                child: messages.isEmpty
-                    ? const Center(
-                        // If no messages, display a message
-                        child: Text(
-                          'No messages yet. Start the conversation!',
-                          style: TextStyle(color: Colors.black54),
+        child: _isLoadingSessions
+            ? const Center(child: CircularProgressIndicator())
+            : _sessions.isEmpty
+                ? _buildNoSessionState()
+                : Column(
+                    children: [
+                      // -- Contact selector --
+                      _buildContactSelector(),
+                      // -- Selected user info --
+                      _buildSelectedUserInfo(),
+                      Expanded(
+                        child: Container(
+                          width: double.infinity,
+                          color: Colors.grey.shade100, // Background color
+                          child: messages.isEmpty
+                              ? const Center(
+                                  // If no messages, display a message
+                                  child: Text(
+                                    'No messages yet. Start the conversation!',
+                                    style: TextStyle(color: Colors.black54),
+                                  ),
+                                )
+                              : ListView.builder(
+                                  // If messages, display them
+                                  controller: _messagesScrollController,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 12,
+                                  ),
+                                  itemCount: messages.length,
+                                  itemBuilder: (BuildContext context, int index) {
+                                    return _MessageBubble(message: messages[index]);
+                                  },
+                                ),
                         ),
-                      )
-                    : ListView.builder(
-                        // If messages, display them
-                        controller: _messagesScrollController,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                        itemCount: messages.length,
-                        itemBuilder: (BuildContext context, int index) {
-                          return _MessageBubble(message: messages[index]);
-                        },
                       ),
-              ),
-            ),
-            // -- Message input --
-            _buildMessageInput(),
-          ],
-        ),
+                      // -- Message input --
+                      _buildMessageInput(),
+                    ],
+                  ),
       ),
     );
   }
 
   void _onBackButtonPressed() {
-    context.pop();
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.go('/');
+  }
+
+  Widget _buildNoSessionState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'No active relation session found.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Go back and pair again.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            ElevatedButton(
+              onPressed: _onBackButtonPressed,
+              child: const Text('Go back'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // Builds the contact selector
@@ -166,18 +350,20 @@ class _RelationScreenState extends State<RelationScreen> {
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         scrollDirection: Axis.horizontal,
-        itemCount: _contacts.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemCount: _sessions.length,
+        separatorBuilder: (_, index) => const SizedBox(width: 10),
         itemBuilder: (BuildContext context, int index) {
-          final _MockContact contact = _contacts[index];
-          final bool isSelected = contact.id == _selectedContactId;
+          final session = _sessions[index];
+          final bool isSelected = session.myRelationCode == _selectedContactId;
 
-          // When taped, update the selected contact and scroll to the latest message
+          // When tapped, update the selected contact and scroll to latest message.
           return GestureDetector(
-            onTap: () {
+            onTap: () async {
               setState(() {
-                _selectedContactId = contact.id;
+                _selectedContactId = session.myRelationCode;
               });
+              await _relationStorage.setActiveRelationCode(session.myRelationCode);
+              _startPollingForSelectedContact();
               _scrollToLatestMessage();
             },
             child: CircleAvatar(
@@ -200,13 +386,16 @@ class _RelationScreenState extends State<RelationScreen> {
 
   /// Builds the selected user info
   Widget _buildSelectedUserInfo() {
+    final session = _selectedSession;
+    final label = session == null ? '-' : session.peerRelationCode;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(
-          // Display the currently selected contact's name
-          _selectedContact.name,
+          // Display the currently selected contact's label
+          label,
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
         ),
       ),
@@ -244,54 +433,18 @@ class _RelationScreenState extends State<RelationScreen> {
           IconButton(
             // Only can be send if the message input is not empty
             onPressed: _canSend ? _sendMessage : null,
-            icon: const Icon(Icons.send),
+            icon: _isSending
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.send),
             tooltip: 'Send',
           ),
         ],
       ),
     );
-  }
-
-  /// MOCK: Simulates sending a message
-  /// TODO [BACKEND]: Replace with actual message sending
-  void _sendMessage() {
-    final String text = _messageController.text.trim();
-    if (text.isEmpty) {
-      return;
-    }
-
-    setState(() {
-      _messagesByContact.putIfAbsent(
-        _selectedContactId,
-        () => <_MockMessage>[],
-      );
-      _messagesByContact[_selectedContactId]!.add(
-        _MockMessage(
-          contactId: _selectedContactId,
-          text: text,
-          timestamp: DateTime.now(),
-          isOutgoing: true,
-        ),
-      );
-      _messageController.clear();
-    });
-
-    _scrollToLatestMessage();
-  }
-
-  /// Scrolls to the latest message
-  /// TODO [BACKEND]: Replace with actual scrolling to the latest message
-  void _scrollToLatestMessage() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_messagesScrollController.hasClients) {
-        return;
-      }
-      _messagesScrollController.animateTo(
-        _messagesScrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    });
   }
 }
 
@@ -299,7 +452,7 @@ class _RelationScreenState extends State<RelationScreen> {
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({required this.message}); // Constructor
 
-  final _MockMessage message; // The sent message
+  final _ChatMessage message; // The sent message
 
   // Build method:
   // It renders the _MessageBubble
@@ -311,7 +464,7 @@ class _MessageBubble extends StatelessWidget {
         : Alignment
               .centerLeft; // Changes the alignment of the bubble based on the message sender
     final Color bubbleColor = message.isOutgoing
-        ? Color(0xff0d47a1)
+        ? const Color(0xff0d47a1)
         : Colors
               .white; // Changes the color of the bubble based on the message sender
 
@@ -358,22 +511,10 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-/// Data classes:
-///
-/// _MockContact class:
-/// Represents a mock contact with an ID and a name.
-///
-/// _MockMessage class:
-/// Represents a mock message sent to a contact.
-class _MockContact {
-  const _MockContact({required this.id, required this.name});
-
-  final String id;
-  final String name;
-}
-
-class _MockMessage {
-  const _MockMessage({
+/// _ChatMessage class:
+/// Represents a message sent to a contact.
+class _ChatMessage {
+  const _ChatMessage({
     required this.contactId,
     required this.text,
     required this.timestamp,
