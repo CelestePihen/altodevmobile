@@ -28,7 +28,9 @@ class _RelationScreenState extends State<RelationScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _messagesScrollController = ScrollController();
 
-  final RelationStorage _relationStorage = RelationStorage(const FlutterSecureStorage());
+  final RelationStorage _relationStorage = RelationStorage(
+    const FlutterSecureStorage(),
+  );
 
   final Map<String, List<_ChatMessage>> _messagesByContact =
       <String, List<_ChatMessage>>{};
@@ -42,6 +44,9 @@ class _RelationScreenState extends State<RelationScreen> {
   bool _isPolling = false;
 
   Timer? _incomingPollingTimer;
+
+  List<String> options = <String>['One', 'Two', 'Three', 'Viva', 'L`Algérie'];
+  String dropdownValue = 'One';
 
   /// Gets if the user can send a message (i.e. if the message input is not empty)
   bool get _canSend {
@@ -100,7 +105,8 @@ class _RelationScreenState extends State<RelationScreen> {
 
     if (!mounted) return;
 
-    final String? selectedId = active?.myRelationCode ??
+    final String? selectedId =
+        active?.myRelationCode ??
         (sessions.isNotEmpty ? sessions.first.myRelationCode : null);
 
     setState(() {
@@ -266,43 +272,43 @@ class _RelationScreenState extends State<RelationScreen> {
         child: _isLoadingSessions
             ? const Center(child: CircularProgressIndicator())
             : _sessions.isEmpty
-                ? _buildNoSessionState()
-                : Column(
-                    children: [
-                      // -- Contact selector --
-                      _buildContactSelector(),
-                      // -- Selected user info --
-                      _buildSelectedUserInfo(),
-                      Expanded(
-                        child: Container(
-                          width: double.infinity,
-                          color: Colors.grey.shade100, // Background color
-                          child: messages.isEmpty
-                              ? const Center(
-                                  // If no messages, display a message
-                                  child: Text(
-                                    'No messages yet. Start the conversation!',
-                                    style: TextStyle(color: Colors.black54),
-                                  ),
-                                )
-                              : ListView.builder(
-                                  // If messages, display them
-                                  controller: _messagesScrollController,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
-                                  ),
-                                  itemCount: messages.length,
-                                  itemBuilder: (BuildContext context, int index) {
-                                    return _MessageBubble(message: messages[index]);
-                                  },
-                                ),
-                        ),
-                      ),
-                      // -- Message input --
-                      _buildMessageInput(),
-                    ],
+            ? _buildNoSessionState()
+            : Column(
+                children: [
+                  // -- Contact selector --
+                  _buildContactSelector(),
+                  // -- Selected user info --
+                  _buildSelectedUserInfo(),
+                  Expanded(
+                    child: Container(
+                      width: double.infinity,
+                      color: Colors.grey.shade100, // Background color
+                      child: messages.isEmpty
+                          ? const Center(
+                              // If no messages, display a message
+                              child: Text(
+                                'No messages yet. Start the conversation!',
+                                style: TextStyle(color: Colors.black54),
+                              ),
+                            )
+                          : ListView.builder(
+                              // If messages, display them
+                              controller: _messagesScrollController,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                              itemCount: messages.length,
+                              itemBuilder: (BuildContext context, int index) {
+                                return _MessageBubble(message: messages[index]);
+                              },
+                            ),
+                    ),
                   ),
+                  // -- Message input --
+                  _buildMessageInput(),
+                ],
+              ),
       ),
     );
   }
@@ -328,10 +334,7 @@ class _RelationScreenState extends State<RelationScreen> {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Go back and pair again.',
-              textAlign: TextAlign.center,
-            ),
+            const Text('Go back and pair again.', textAlign: TextAlign.center),
             const SizedBox(height: 18),
             ElevatedButton(
               onPressed: _onBackButtonPressed,
@@ -362,7 +365,9 @@ class _RelationScreenState extends State<RelationScreen> {
               setState(() {
                 _selectedContactId = session.myRelationCode;
               });
-              await _relationStorage.setActiveRelationCode(session.myRelationCode);
+              await _relationStorage.setActiveRelationCode(
+                session.myRelationCode,
+              );
               _startPollingForSelectedContact();
               _scrollToLatestMessage();
             },
@@ -409,6 +414,43 @@ class _RelationScreenState extends State<RelationScreen> {
       decoration: const BoxDecoration(color: Colors.white),
       child: Row(
         children: [
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: DropdownButtonHideUnderline(
+              // -- Types selection --
+              child: DropdownButton<String>(
+                value: dropdownValue,
+                onChanged: (String? value) {
+                  if (value == null) return;
+                  setState(() {
+                    dropdownValue = value;
+                  });
+                },
+                items: options.map<DropdownMenuItem<String>>((String value) {
+                  return DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(value),
+                  );
+                }).toList(),
+                icon: const Icon(
+                  Icons.more_vert,
+                  color: Colors.black,
+                ),
+                selectedItemBuilder: (BuildContext contact) {
+                  return options.map((String value) {
+                    return const Center(
+                      child: Icon(
+                        Icons.more_vert,
+                        color: Colors.black,
+                      ),
+                    );
+                  }).toList();
+                },
+                isExpanded: true,
+              ),
+            ),
+          ),
           Expanded(
             child: TextField(
               // -- Message input --
@@ -440,7 +482,6 @@ class _RelationScreenState extends State<RelationScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.send),
-            tooltip: 'Send',
           ),
         ],
       ),
@@ -469,7 +510,9 @@ class _MessageBubble extends StatelessWidget {
               .white; // Changes the color of the bubble based on the message sender
 
     final Color textColor = message.isOutgoing ? Colors.white : Colors.black;
-    final Color timestampColor = message.isOutgoing ? Colors.white70 : Colors.black54;
+    final Color timestampColor = message.isOutgoing
+        ? Colors.white70
+        : Colors.black54;
 
     return Align(
       alignment: alignment,
