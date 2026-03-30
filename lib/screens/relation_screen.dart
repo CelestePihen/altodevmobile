@@ -115,7 +115,7 @@ class _RelationScreenState extends State<RelationScreen> {
   void _startPollingForSelectedContact() {
     _incomingPollingTimer?.cancel();
     _pollIncomingElement();
-    _incomingPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _incomingPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       _pollIncomingElement();
     });
   }
@@ -416,15 +416,16 @@ class _RelationScreenState extends State<RelationScreen> {
               // For security, limits the message length to 200 characters
               maxLines: 4,
               minLines: 1,
+              maxLength: _messageMaxLength,
               textInputAction: TextInputAction.newline,
               inputFormatters: <TextInputFormatter>[
                 LengthLimitingTextInputFormatter(_messageMaxLength),
               ],
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Write something...',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 isDense: true,
-                counterText: '',
+                counterText: '${_messageController.text.length} / $_messageMaxLength',
               ),
             ),
           ),
