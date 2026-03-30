@@ -8,6 +8,7 @@ import 'package:altodevmobile/screens/pairing_screen.dart';
 import 'package:altodevmobile/screens/relation_screen.dart';
 import 'package:altodevmobile/screens/scanning_screen.dart';
 
+//
 // Entry point of the application
 void main() async {
   // Ensure orientation is always portrait
