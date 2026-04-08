@@ -6,9 +6,9 @@ import 'package:altodevmobile/models/relation_session.dart';
 /// Persists relation sessions and the currently active one.
 class RelationStorage {
   // Storage keys for relation sessions and active session
-  static const String _activeSessionKey = 'relation_active_session_v1';
-  static const String _activeRelationCodeKey = 'relation_active_code_v1';
-  static const String _sessionsKey = 'relation_sessions_v1';
+  static const String _activeSessionKey = 'alto_relation_active_session';
+  static const String _activeRelationCodeKey = 'alto_relation_active_code';
+  static const String _sessionsKey = 'alto_relation_sessions';
   final FlutterSecureStorage _storage;
 
   RelationStorage(this._storage);

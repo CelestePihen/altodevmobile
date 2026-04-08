@@ -24,6 +24,17 @@ class RelationScreen extends StatefulWidget {
 class _RelationScreenState extends State<RelationScreen> {
   /// Message length is maxed to 200 characters to ensure security
   static const int _messageMaxLength = 200;
+  static const Color _defaultUiColor = Colors.white;
+  static const List<Color> _colorOptions = <Color>[
+    Color(0xFFFFCDD2),
+    Color(0xFFFFE0B2),
+    Color(0xFFFFF9C4),
+    Color(0xFFC8E6C9),
+    Color(0xFFB2EBF2),
+    Color(0xFFC5CAE9),
+    Color(0xFFD1C4E9),
+    Color(0xFFF8BBD0),
+  ];
 
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _messagesScrollController = ScrollController();
@@ -36,6 +47,7 @@ class _RelationScreenState extends State<RelationScreen> {
       <String, List<_ChatMessage>>{};
   final Map<String, String> _lastIncomingFingerprintByContact =
       <String, String>{};
+  final Map<String, Color> _uiColorByContact = <String, Color>{};
 
   List<RelationSession> _sessions = <RelationSession>[];
   String? _selectedContactId;
@@ -44,16 +56,29 @@ class _RelationScreenState extends State<RelationScreen> {
   bool _isPolling = false;
 
   Timer? _incomingPollingTimer;
+  Color _selectedColorToSend = _colorOptions.first;
 
-  List<String> options = <String>['One', 'Two', 'Three', 'Viva', 'L`Algérie'];
-  String dropdownValue = 'One';
+  Map<String, IconData> options = {
+    'LINK': Icons.add_link,
+    'COLOR': Icons.color_lens,
+    'MESSAGE': Icons.message,
+  };
+  String dropdownValue = 'MESSAGE';
+
+  bool get _isColorMode => dropdownValue == 'COLOR';
+
+  Color get _activeUiColor {
+    final selectedId = _selectedContactId;
+    if (selectedId == null) return _defaultUiColor;
+    return _uiColorByContact[selectedId] ?? _defaultUiColor;
+  }
 
   /// Gets if the user can send a message (i.e. if the message input is not empty)
   bool get _canSend {
     return !_isLoadingSessions &&
         !_isSending &&
         _selectedSession != null &&
-        _messageController.text.trim().isNotEmpty;
+        (_isColorMode || _messageController.text.trim().isNotEmpty);
   }
 
   /// Gets the current selected session
@@ -142,12 +167,12 @@ class _RelationScreenState extends State<RelationScreen> {
       final encryptedValue = (element['value'] ?? '').trim();
       final creationDate = (element['creationDate'] ?? '').trim();
 
-      if (key != 'MESSAGE' || encryptedValue.isEmpty) {
+      if ((key != 'MESSAGE' && key != 'COLOR') || encryptedValue.isEmpty) {
         return;
       }
 
       final contactId = session.myRelationCode;
-      final fingerprint = '$creationDate|$encryptedValue';
+      final fingerprint = '$key|$creationDate|$encryptedValue';
       if (_lastIncomingFingerprintByContact[contactId] == fingerprint) {
         return;
       }
@@ -164,6 +189,13 @@ class _RelationScreenState extends State<RelationScreen> {
 
       setState(() {
         _lastIncomingFingerprintByContact[contactId] = fingerprint;
+        if (key == 'COLOR') {
+          final Color? parsedColor = _parseColorFromHex(clearText);
+          if (parsedColor != null) {
+            _uiColorByContact[contactId] = parsedColor;
+          }
+          return;
+        }
         _messagesByContact.putIfAbsent(contactId, () => <_ChatMessage>[]);
         _messagesByContact[contactId]!.add(
           _ChatMessage(
@@ -185,8 +217,13 @@ class _RelationScreenState extends State<RelationScreen> {
     final session = _selectedSession;
     final selectedId = _selectedContactId;
     final text = _messageController.text.trim();
+    final bool isColorType = dropdownValue == 'COLOR';
 
-    if (session == null || selectedId == null || text.isEmpty || _isSending) {
+    if (session == null || selectedId == null || _isSending) {
+      return;
+    }
+
+    if (!isColorType && text.isEmpty) {
       return;
     }
 
@@ -195,21 +232,26 @@ class _RelationScreenState extends State<RelationScreen> {
     });
 
     try {
+      final String payload = isColorType ? _colorToHex(_selectedColorToSend) : text;
       final encrypted = rsaEncryptToBase64(
         recipientPublicKeyPem: session.peerPublicKeyPem,
-        plaintext: text,
+        plaintext: payload,
       );
 
       // Backend behavior currently expects the peer relation code inbox.
       await ElementService.instance.sendElement(
         relationCode: session.peerRelationCode,
-        type: 'MESSAGE',
+        type: isColorType ? 'COLOR' : 'MESSAGE',
         value: encrypted,
       );
 
       if (!mounted) return;
 
       setState(() {
+        if (isColorType) {
+          _uiColorByContact[selectedId] = _selectedColorToSend;
+          return;
+        }
         _messagesByContact.putIfAbsent(selectedId, () => <_ChatMessage>[]);
         _messagesByContact[selectedId]!.add(
           _ChatMessage(
@@ -222,7 +264,9 @@ class _RelationScreenState extends State<RelationScreen> {
         _messageController.clear();
       });
 
-      _scrollToLatestMessage();
+      if (!isColorType) {
+        _scrollToLatestMessage();
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -244,6 +288,19 @@ class _RelationScreenState extends State<RelationScreen> {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  String _colorToHex(Color color) {
+    final int rgb = color.toARGB32() & 0x00FFFFFF;
+    return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
+
+  Color? _parseColorFromHex(String value) {
+    final String normalized = value.trim().replaceFirst('#', '');
+    if (normalized.length != 6) return null;
+    final int? rgb = int.tryParse(normalized, radix: 16);
+    if (rgb == null) return null;
+    return Color(0xFF000000 | rgb);
   }
 
   // Build method:
@@ -348,43 +405,46 @@ class _RelationScreenState extends State<RelationScreen> {
 
   // Builds the contact selector
   Widget _buildContactSelector() {
-    return SizedBox(
-      height: 92,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        scrollDirection: Axis.horizontal,
-        itemCount: _sessions.length,
-        separatorBuilder: (_, index) => const SizedBox(width: 10),
-        itemBuilder: (BuildContext context, int index) {
-          final session = _sessions[index];
-          final bool isSelected = session.myRelationCode == _selectedContactId;
+    return Container(
+      color: _activeUiColor,
+      child: SizedBox(
+        height: 92,
+        child: ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          scrollDirection: Axis.horizontal,
+          itemCount: _sessions.length,
+          separatorBuilder: (_, index) => const SizedBox(width: 10),
+          itemBuilder: (BuildContext context, int index) {
+            final session = _sessions[index];
+            final bool isSelected = session.myRelationCode == _selectedContactId;
 
-          // When tapped, update the selected contact and scroll to latest message.
-          return GestureDetector(
-            onTap: () async {
-              setState(() {
-                _selectedContactId = session.myRelationCode;
-              });
-              await _relationStorage.setActiveRelationCode(
-                session.myRelationCode,
-              );
-              _startPollingForSelectedContact();
-              _scrollToLatestMessage();
-            },
-            child: CircleAvatar(
-              // Updates the newly selected contact's avatar
-              radius: isSelected ? 30 : 26,
-              backgroundColor: isSelected
-                  ? Colors.green.shade500
-                  : Colors.grey.shade400,
-              child: Icon(
-                Icons.person,
-                size: isSelected ? 32 : 28,
-                color: Colors.white,
+            // When tapped, update the selected contact and scroll to latest message.
+            return GestureDetector(
+              onTap: () async {
+                setState(() {
+                  _selectedContactId = session.myRelationCode;
+                });
+                await _relationStorage.setActiveRelationCode(
+                  session.myRelationCode,
+                );
+                _startPollingForSelectedContact();
+                _scrollToLatestMessage();
+              },
+              child: CircleAvatar(
+                // Updates the newly selected contact's avatar
+                radius: isSelected ? 30 : 26,
+                backgroundColor: isSelected
+                    ? Colors.green.shade500
+                    : Colors.grey.shade400,
+                child: Icon(
+                  Icons.person,
+                  size: isSelected ? 32 : 28,
+                  color: Colors.white,
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -394,7 +454,8 @@ class _RelationScreenState extends State<RelationScreen> {
     final session = _selectedSession;
     final label = session == null ? '-' : session.peerRelationCode;
 
-    return Padding(
+    return Container(
+      color: _activeUiColor,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Align(
         alignment: Alignment.centerLeft,
@@ -407,15 +468,47 @@ class _RelationScreenState extends State<RelationScreen> {
     );
   }
 
+  Widget _buildColorPickerInput() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _colorOptions.map((Color color) {
+          final bool isSelected =
+              color.toARGB32() == _selectedColorToSend.toARGB32();
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedColorToSend = color;
+              });
+            },
+            child: Container(
+              width: 28,
+              height: 28,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? Colors.black : Colors.black26,
+                  width: isSelected ? 2 : 1,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   // Builds the message input
   Widget _buildMessageInput() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      decoration: const BoxDecoration(color: Colors.white),
+      padding: const EdgeInsets.fromLTRB(12, 17, 12, 12),
+      decoration: BoxDecoration(color: _activeUiColor),
       child: Row(
         children: [
           SizedBox(
-            width: 40,
+            width: 48,
             height: 40,
             child: DropdownButtonHideUnderline(
               // -- Types selection --
@@ -427,49 +520,60 @@ class _RelationScreenState extends State<RelationScreen> {
                     dropdownValue = value;
                   });
                 },
-                items: options.map<DropdownMenuItem<String>>((String value) {
+                items: options.entries.map<DropdownMenuItem<String>>((entry) {
+                  final String value = entry.key;
+                  final IconData icon = entry.value;
                   return DropdownMenuItem<String>(
                     value: value,
-                    child: Text(value),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(icon, size: 16),
+                        const SizedBox(width: 4),
+                        Text(
+                          value,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    ),
                   );
                 }).toList(),
-                icon: const Icon(
-                  Icons.more_vert,
-                  color: Colors.black,
-                ),
-                selectedItemBuilder: (BuildContext contact) {
-                  return options.map((String value) {
-                    return const Center(
-                      child: Icon(
-                        Icons.more_vert,
-                        color: Colors.black,
-                      ),
+
+                selectedItemBuilder: (BuildContext context) {
+                  return options.keys.map<Widget>((String value) {
+                    final icon = options[value]!;
+                    return Center(
+                      child: Icon(icon, color: Colors.black),
                     );
                   }).toList();
                 },
-                isExpanded: true,
+                isExpanded: false,
               ),
             ),
           ),
           Expanded(
-            child: TextField(
-              // -- Message input --
-              controller: _messageController,
-              // For security, limits the message length to 200 characters
-              maxLines: 4,
-              minLines: 1,
-              maxLength: _messageMaxLength,
-              textInputAction: TextInputAction.newline,
-              inputFormatters: <TextInputFormatter>[
-                LengthLimitingTextInputFormatter(_messageMaxLength),
-              ],
-              decoration: InputDecoration(
-                hintText: 'Write something...',
-                border: const OutlineInputBorder(),
-                isDense: true,
-                counterText: '${_messageController.text.length} / $_messageMaxLength',
-              ),
-            ),
+            child: _isColorMode
+                ? _buildColorPickerInput()
+                : TextField(
+                    // -- Message input --
+                    controller: _messageController,
+                    // For security, limits the message length to 200 characters
+                    maxLines: 4,
+                    minLines: 1,
+                    maxLength: _messageMaxLength,
+                    textInputAction: TextInputAction.newline,
+                    inputFormatters: <TextInputFormatter>[
+                      LengthLimitingTextInputFormatter(_messageMaxLength),
+                    ],
+                    decoration: InputDecoration(
+                      hintText: 'Write something...',
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      counterText:
+                          '${_messageController.text.length} / $_messageMaxLength',
+                    ),
+                  ),
           ),
           const SizedBox(width: 8),
           // -- Send button --

@@ -226,7 +226,7 @@ Future<void> showErrorDisplay({
     context: context,
     barrierDismissible: false,
     barrierColor: Colors.transparent, // ErrorDisplay handles its own backdrop
-    pageBuilder: (_, __, ___) => ErrorDisplay(
+    pageBuilder: (_, _, _) => ErrorDisplay(
       type: type,
       message: message,
       position: position,

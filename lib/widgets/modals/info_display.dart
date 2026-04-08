@@ -229,7 +229,7 @@ Future<void> showInfoDisplay({
     context: context,
     barrierDismissible: false,
     barrierColor: Colors.transparent, // InfoDisplay handles its own backdrop
-    pageBuilder: (_, __, ___) => InfoDisplay(
+    pageBuilder: (_, _, _) => InfoDisplay(
       title: title,
       message: message,
       position: position,
