@@ -25,6 +25,7 @@ class RelationScreen extends StatefulWidget {
 class _RelationScreenState extends State<RelationScreen> {
   /// Message length is maxed to 200 characters to ensure security
   static const int _messageMaxLength = 200;
+  static const int _nicknameMaxLength = 32;
   static const Color _defaultUiColor = Colors.white;
   static const List<Color> _colorOptions = <Color>[
     Color(0xFFFFCDD2),
@@ -62,15 +63,24 @@ class _RelationScreenState extends State<RelationScreen> {
   Map<String, IconData> options = {
     'LINK': Icons.add_link,
     'COLOR': Icons.color_lens,
+    'NICKNAME': Icons.badge,
     'MESSAGE': Icons.message,
   };
   String dropdownValue = 'MESSAGE';
 
   bool get _isColorMode => dropdownValue == 'COLOR';
   bool get _isLinkMode => dropdownValue == 'LINK';
+  bool get _isNicknameMode => dropdownValue == 'NICKNAME';
 
   Uri? get _currentInputLinkUri =>
       _buildLaunchUri(_messageController.text.trim());
+  String get _currentInputNickname => _sanitizeNickname(_messageController.text);
+
+  String _peerDisplayName(RelationSession session) {
+    final String nickname = (session.peerNickname ?? '').trim();
+    if (nickname.isNotEmpty) return nickname;
+    return session.peerRelationCode;
+  }
 
   Color get _activeUiColor {
     final selectedId = _selectedContactId;
@@ -84,7 +94,12 @@ class _RelationScreenState extends State<RelationScreen> {
     return !_isLoadingSessions &&
         !_isSending &&
         _selectedSession != null &&
-        (_isColorMode || (_isLinkMode ? _currentInputLinkUri != null : text.isNotEmpty));
+        (_isColorMode ||
+            (_isLinkMode
+                ? _currentInputLinkUri != null
+                : (_isNicknameMode
+                    ? _isValidNickname(_currentInputNickname)
+                    : text.isNotEmpty)));
   }
 
   /// Gets the current selected session
@@ -186,7 +201,8 @@ class _RelationScreenState extends State<RelationScreen> {
       final encryptedValue = (element['value'] ?? '').trim();
       final creationDate = (element['creationDate'] ?? '').trim();
 
-      if ((key != 'MESSAGE' && key != 'COLOR') || encryptedValue.isEmpty) {
+      if ((key != 'MESSAGE' && key != 'COLOR' && key != 'NICKNAME') ||
+          encryptedValue.isEmpty) {
         return;
       }
 
@@ -207,6 +223,7 @@ class _RelationScreenState extends State<RelationScreen> {
       }
 
       Color? colorToPersist;
+      String? myNicknameToPersist;
 
       setState(() {
         _lastIncomingFingerprintByContact[contactId] = fingerprint;
@@ -218,6 +235,26 @@ class _RelationScreenState extends State<RelationScreen> {
           }
           return;
         }
+
+        if (key == 'NICKNAME') {
+          final String nickname = _sanitizeNickname(clearText);
+          if (!_isValidNickname(nickname)) return;
+
+          final String senderLabel = _peerDisplayName(session);
+          _messagesByContact.putIfAbsent(contactId, () => <_ChatMessage>[]);
+          _messagesByContact[contactId]!.add(
+            _ChatMessage(
+              contactId: contactId,
+              text: "$senderLabel defined your pseudo as '$nickname'.",
+              timestamp: DateTime.now(),
+              isOutgoing: false,
+              isSystem: true,
+            ),
+          );
+          myNicknameToPersist = nickname;
+          return;
+        }
+
         _messagesByContact.putIfAbsent(contactId, () => <_ChatMessage>[]);
         _messagesByContact[contactId]!.add(
           _ChatMessage(
@@ -234,6 +271,13 @@ class _RelationScreenState extends State<RelationScreen> {
         return;
       }
 
+      if (myNicknameToPersist != null) {
+        await _persistNicknameForContact(
+          contactId,
+          myNickname: myNicknameToPersist,
+        );
+      }
+
       _scrollToLatestMessage();
     } finally {
       _isPolling = false;
@@ -246,6 +290,8 @@ class _RelationScreenState extends State<RelationScreen> {
     final text = _messageController.text.trim();
     final bool isColorType = dropdownValue == 'COLOR';
     final bool isLinkType = dropdownValue == 'LINK';
+    final bool isNicknameType = dropdownValue == 'NICKNAME';
+    final String nickname = _sanitizeNickname(text);
 
     if (session == null || selectedId == null || _isSending) {
       return;
@@ -263,6 +309,15 @@ class _RelationScreenState extends State<RelationScreen> {
       return;
     }
 
+    if (isNicknameType && !_isValidNickname(nickname)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nickname must be between 1 and 32 characters.'),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isSending = true;
     });
@@ -270,7 +325,7 @@ class _RelationScreenState extends State<RelationScreen> {
     try {
       final String payload = isColorType
           ? _colorToHex(_selectedColorToSend)
-          : (isLinkType ? linkUri.toString() : text);
+          : (isLinkType ? linkUri.toString() : (isNicknameType ? nickname : text));
       final encrypted = rsaEncryptToBase64(
         recipientPublicKeyPem: session.peerPublicKeyPem,
         plaintext: payload,
@@ -280,7 +335,9 @@ class _RelationScreenState extends State<RelationScreen> {
       await ElementService.instance.sendElement(
         relationCode: session.peerRelationCode,
         // LINK still uses MESSAGE to keep receiver compatibility.
-        type: isColorType ? 'COLOR' : 'MESSAGE',
+        type: isColorType
+            ? 'COLOR'
+            : (isNicknameType ? 'NICKNAME' : 'MESSAGE'),
         value: encrypted,
       );
 
@@ -291,6 +348,22 @@ class _RelationScreenState extends State<RelationScreen> {
           _uiColorByContact[selectedId] = _selectedColorToSend;
           return;
         }
+
+        if (isNicknameType) {
+          _messagesByContact.putIfAbsent(selectedId, () => <_ChatMessage>[]);
+          _messagesByContact[selectedId]!.add(
+            _ChatMessage(
+              contactId: selectedId,
+              text: "You defined the pseudo of ${session.peerRelationCode} as '$payload'.",
+              timestamp: DateTime.now(),
+              isOutgoing: true,
+              isSystem: true,
+            ),
+          );
+          _messageController.clear();
+          return;
+        }
+
         _messagesByContact.putIfAbsent(selectedId, () => <_ChatMessage>[]);
         _messagesByContact[selectedId]!.add(
           _ChatMessage(
@@ -305,8 +378,14 @@ class _RelationScreenState extends State<RelationScreen> {
 
       if (!isColorType) {
         _scrollToLatestMessage();
-      } else {
+      }
+
+      if (isColorType) {
         await _persistUiColorForContact(selectedId, _selectedColorToSend);
+      }
+
+      if (isNicknameType) {
+        await _persistNicknameForContact(selectedId, peerNickname: payload);
       }
     } finally {
       if (mounted) {
@@ -353,6 +432,17 @@ class _RelationScreenState extends State<RelationScreen> {
     return Uri.tryParse('https://$value');
   }
 
+  /// Normalizes nickname input for consistent UX and validation:
+  /// - trims leading/trailing whitespace
+  /// - collapses consecutive whitespace into a single space
+  String _sanitizeNickname(String rawValue) {
+    return rawValue.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  bool _isValidNickname(String nickname) {
+    return nickname.isNotEmpty && nickname.length <= _nicknameMaxLength;
+  }
+
   Color? _parseColorFromHex(String value) {
     final String normalized = value.trim().replaceFirst('#', '');
     if (normalized.length != 6) return null;
@@ -375,6 +465,35 @@ class _RelationScreenState extends State<RelationScreen> {
     if (current == null) return;
 
     final updated = current.copyWith(uiColorHex: _colorToHex(color));
+    await _relationStorage.upsertSession(updated);
+
+    if (!mounted) return;
+    setState(() {
+      _sessions[currentIndex] = updated;
+    });
+  }
+
+  Future<void> _persistNicknameForContact(
+    String contactId, {
+    String? myNickname,
+    String? peerNickname,
+  }) async {
+    RelationSession? current;
+    int currentIndex = -1;
+    for (int i = 0; i < _sessions.length; i++) {
+      if (_sessions[i].myRelationCode == contactId) {
+        current = _sessions[i];
+        currentIndex = i;
+        break;
+      }
+    }
+
+    if (current == null) return;
+
+    final updated = current.copyWith(
+      myNickname: myNickname,
+      peerNickname: peerNickname,
+    );
     await _relationStorage.upsertSession(updated);
 
     if (!mounted) return;
@@ -532,7 +651,7 @@ class _RelationScreenState extends State<RelationScreen> {
   /// Builds the selected user info
   Widget _buildSelectedUserInfo() {
     final session = _selectedSession;
-    final label = session == null ? '-' : session.peerRelationCode;
+    final label = session == null ? '-' : _peerDisplayName(session);
 
     return Container(
       color: _activeUiColor,
@@ -588,7 +707,7 @@ class _RelationScreenState extends State<RelationScreen> {
       child: Row(
         children: [
           SizedBox(
-            width: 48,
+            width: 56,
             height: 40,
             child: DropdownButtonHideUnderline(
               // -- Types selection --
@@ -641,19 +760,25 @@ class _RelationScreenState extends State<RelationScreen> {
                     // For security, limits the message length to 200 characters
                     maxLines: 4,
                     minLines: 1,
-                    maxLength: _messageMaxLength,
+                    maxLength: _isNicknameMode
+                        ? _nicknameMaxLength
+                        : _messageMaxLength,
                     textInputAction: TextInputAction.newline,
                     inputFormatters: <TextInputFormatter>[
-                      LengthLimitingTextInputFormatter(_messageMaxLength),
+                      LengthLimitingTextInputFormatter(
+                        _isNicknameMode ? _nicknameMaxLength : _messageMaxLength,
+                      ),
                     ],
                     decoration: InputDecoration(
                       hintText: _isLinkMode
                           ? 'https://example.com'
-                          : 'Write something...',
+                          : (_isNicknameMode
+                              ? 'Set a nickname (max 32)...'
+                              : 'Write something...'),
                       border: const OutlineInputBorder(),
                       isDense: true,
                       counterText:
-                          '${_messageController.text.length} / $_messageMaxLength',
+                          '${_messageController.text.length} / ${_isNicknameMode ? _nicknameMaxLength : _messageMaxLength}',
                     ),
                   ),
           ),
@@ -687,6 +812,25 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Uri? linkUri = _tryParseLink(message.text);
+
+    if (message.isSystem) {
+      return Align(
+        alignment: Alignment.center,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            message.text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+          ),
+        ),
+      );
+    }
 
     // Whether the message was sent by the user or the contact
     final Alignment alignment = message.isOutgoing
@@ -794,10 +938,12 @@ class _ChatMessage {
     required this.text,
     required this.timestamp,
     required this.isOutgoing,
+    this.isSystem = false,
   });
 
   final String contactId;
   final String text;
   final DateTime timestamp;
   final bool isOutgoing;
+  final bool isSystem;
 }

@@ -21,6 +21,8 @@ class RelationSession {
   final String myPrivateKeyPem;
   final String peerPublicKeyPem;
   final String? uiColorHex;
+  final String? myNickname;
+  final String? peerNickname;
 
   const RelationSession({
     required this.myRelationCode,
@@ -28,6 +30,8 @@ class RelationSession {
     required this.myPrivateKeyPem,
     required this.peerPublicKeyPem,
     this.uiColorHex,
+    this.myNickname,
+    this.peerNickname,
   });
 
   /// Serializes the session to a map using the current app schema.
@@ -38,6 +42,8 @@ class RelationSession {
       'myPrivateKeyPem': myPrivateKeyPem,
       'peerPublicKeyPem': peerPublicKeyPem,
       'uiColorHex': uiColorHex,
+      'myNickname': myNickname,
+      'peerNickname': peerNickname,
     };
   }
 
@@ -51,6 +57,10 @@ class RelationSession {
     final peerPublicKeyPem = (map['peerPublicKeyPem'] ?? '').toString().trim();
     final rawUiColorHex = (map['uiColorHex'] ?? '').toString().trim();
     final uiColorHex = rawUiColorHex.isEmpty ? null : rawUiColorHex;
+    final rawMyNickname = (map['myNickname'] ?? '').toString().trim();
+    final myNickname = rawMyNickname.isEmpty ? null : rawMyNickname;
+    final rawPeerNickname = (map['peerNickname'] ?? '').toString().trim();
+    final peerNickname = rawPeerNickname.isEmpty ? null : rawPeerNickname;
 
     if (myRelationCode.isEmpty ||
         peerRelationCode.isEmpty ||
@@ -65,6 +75,8 @@ class RelationSession {
       myPrivateKeyPem: myPrivateKeyPem,
       peerPublicKeyPem: peerPublicKeyPem,
       uiColorHex: uiColorHex,
+      myNickname: myNickname,
+      peerNickname: peerNickname,
     );
   }
 
@@ -74,6 +86,8 @@ class RelationSession {
     String? myPrivateKeyPem,
     String? peerPublicKeyPem,
     String? uiColorHex,
+    String? myNickname,
+    String? peerNickname,
   }) {
     return RelationSession(
       myRelationCode: myRelationCode ?? this.myRelationCode,
@@ -81,6 +95,8 @@ class RelationSession {
       myPrivateKeyPem: myPrivateKeyPem ?? this.myPrivateKeyPem,
       peerPublicKeyPem: peerPublicKeyPem ?? this.peerPublicKeyPem,
       uiColorHex: uiColorHex ?? this.uiColorHex,
+      myNickname: myNickname ?? this.myNickname,
+      peerNickname: peerNickname ?? this.peerNickname,
     );
   }
 
