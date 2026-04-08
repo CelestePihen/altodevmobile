@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../crypto/relation_storage.dart';
 import '../crypto/rsa_crypto.dart';
@@ -66,6 +67,10 @@ class _RelationScreenState extends State<RelationScreen> {
   String dropdownValue = 'MESSAGE';
 
   bool get _isColorMode => dropdownValue == 'COLOR';
+  bool get _isLinkMode => dropdownValue == 'LINK';
+
+  Uri? get _currentInputLinkUri =>
+      _buildLaunchUri(_messageController.text.trim());
 
   Color get _activeUiColor {
     final selectedId = _selectedContactId;
@@ -75,10 +80,11 @@ class _RelationScreenState extends State<RelationScreen> {
 
   /// Gets if the user can send a message (i.e. if the message input is not empty)
   bool get _canSend {
+    final text = _messageController.text.trim();
     return !_isLoadingSessions &&
         !_isSending &&
         _selectedSession != null &&
-        (_isColorMode || _messageController.text.trim().isNotEmpty);
+        (_isColorMode || (_isLinkMode ? _currentInputLinkUri != null : text.isNotEmpty));
   }
 
   /// Gets the current selected session
@@ -239,6 +245,7 @@ class _RelationScreenState extends State<RelationScreen> {
     final selectedId = _selectedContactId;
     final text = _messageController.text.trim();
     final bool isColorType = dropdownValue == 'COLOR';
+    final bool isLinkType = dropdownValue == 'LINK';
 
     if (session == null || selectedId == null || _isSending) {
       return;
@@ -248,12 +255,22 @@ class _RelationScreenState extends State<RelationScreen> {
       return;
     }
 
+    final Uri? linkUri = isLinkType ? _buildLaunchUri(text) : null;
+    if (isLinkType && linkUri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid link.')),
+      );
+      return;
+    }
+
     setState(() {
       _isSending = true;
     });
 
     try {
-      final String payload = isColorType ? _colorToHex(_selectedColorToSend) : text;
+      final String payload = isColorType
+          ? _colorToHex(_selectedColorToSend)
+          : (isLinkType ? linkUri.toString() : text);
       final encrypted = rsaEncryptToBase64(
         recipientPublicKeyPem: session.peerPublicKeyPem,
         plaintext: payload,
@@ -262,6 +279,7 @@ class _RelationScreenState extends State<RelationScreen> {
       // Backend behavior currently expects the peer relation code inbox.
       await ElementService.instance.sendElement(
         relationCode: session.peerRelationCode,
+        // LINK still uses MESSAGE to keep receiver compatibility.
         type: isColorType ? 'COLOR' : 'MESSAGE',
         value: encrypted,
       );
@@ -277,7 +295,7 @@ class _RelationScreenState extends State<RelationScreen> {
         _messagesByContact[selectedId]!.add(
           _ChatMessage(
             contactId: selectedId,
-            text: text,
+            text: payload,
             timestamp: DateTime.now(),
             isOutgoing: true,
           ),
@@ -316,6 +334,23 @@ class _RelationScreenState extends State<RelationScreen> {
   String _colorToHex(Color color) {
     final int rgb = color.toARGB32() & 0x00FFFFFF;
     return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
+
+  Uri? _buildLaunchUri(String rawValue) {
+    final String value = rawValue.trim();
+    if (value.isEmpty) return null;
+
+    final Uri? parsed = Uri.tryParse(value);
+    if (parsed == null) return null;
+
+    if (parsed.hasScheme) {
+      final String scheme = parsed.scheme.toLowerCase();
+      if (scheme == 'http' || scheme == 'https') return parsed;
+      return null;
+    }
+
+    if (!value.contains('.')) return null;
+    return Uri.tryParse('https://$value');
   }
 
   Color? _parseColorFromHex(String value) {
@@ -612,7 +647,9 @@ class _RelationScreenState extends State<RelationScreen> {
                       LengthLimitingTextInputFormatter(_messageMaxLength),
                     ],
                     decoration: InputDecoration(
-                      hintText: 'Write something...',
+                      hintText: _isLinkMode
+                          ? 'https://example.com'
+                          : 'Write something...',
                       border: const OutlineInputBorder(),
                       isDense: true,
                       counterText:
@@ -649,6 +686,8 @@ class _MessageBubble extends StatelessWidget {
   // It renders the _MessageBubble
   @override
   Widget build(BuildContext context) {
+    final Uri? linkUri = _tryParseLink(message.text);
+
     // Whether the message was sent by the user or the contact
     final Alignment alignment = message.isOutgoing
         ? Alignment.centerRight
@@ -678,10 +717,24 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              message.text,
-              style: TextStyle(fontSize: 16, color: textColor),
-            ),
+            linkUri == null
+                ? Text(
+                    message.text,
+                    style: TextStyle(fontSize: 16, color: textColor),
+                  )
+                : GestureDetector(
+                    onTap: () => _openLink(context, linkUri),
+                    child: Text(
+                      message.text,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: message.isOutgoing
+                            ? Colors.white
+                            : Colors.blue.shade700,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
             const SizedBox(height: 6),
             Text(
               _formatDateTime(message.timestamp),
@@ -701,6 +754,35 @@ class _MessageBubble extends StatelessWidget {
     final String hour = timestamp.hour.toString().padLeft(2, '0');
     final String minute = timestamp.minute.toString().padLeft(2, '0');
     return '$day/$month/$year - $hour:$minute';
+  }
+
+  Uri? _tryParseLink(String rawValue) {
+    final String value = rawValue.trim();
+    if (value.isEmpty) return null;
+
+    final Uri? parsed = Uri.tryParse(value);
+    if (parsed == null) return null;
+
+    if (parsed.hasScheme) {
+      final String scheme = parsed.scheme.toLowerCase();
+      if (scheme == 'http' || scheme == 'https') return parsed;
+      return null;
+    }
+
+    if (!value.contains('.')) return null;
+    return Uri.tryParse('https://$value');
+  }
+
+  Future<void> _openLink(BuildContext context, Uri uri) async {
+    final bool opened = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the link.')),
+      );
+    }
   }
 }
 
