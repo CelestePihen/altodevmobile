@@ -134,9 +134,22 @@ class _RelationScreenState extends State<RelationScreen> {
         active?.myRelationCode ??
         (sessions.isNotEmpty ? sessions.first.myRelationCode : null);
 
+    final Map<String, Color> initialColors = <String, Color>{};
+    for (final session in sessions) {
+      final colorHex = session.uiColorHex;
+      if (colorHex == null || colorHex.isEmpty) continue;
+      final parsed = _parseColorFromHex(colorHex);
+      if (parsed != null) {
+        initialColors[session.myRelationCode] = parsed;
+      }
+    }
+
     setState(() {
       _sessions = sessions;
       _selectedContactId = selectedId;
+      _uiColorByContact
+        ..clear()
+        ..addAll(initialColors);
       _isLoadingSessions = false;
     });
 
@@ -187,12 +200,15 @@ class _RelationScreenState extends State<RelationScreen> {
         return;
       }
 
+      Color? colorToPersist;
+
       setState(() {
         _lastIncomingFingerprintByContact[contactId] = fingerprint;
         if (key == 'COLOR') {
           final Color? parsedColor = _parseColorFromHex(clearText);
           if (parsedColor != null) {
             _uiColorByContact[contactId] = parsedColor;
+            colorToPersist = parsedColor;
           }
           return;
         }
@@ -206,6 +222,11 @@ class _RelationScreenState extends State<RelationScreen> {
           ),
         );
       });
+
+      if (colorToPersist != null) {
+        await _persistUiColorForContact(contactId, colorToPersist!);
+        return;
+      }
 
       _scrollToLatestMessage();
     } finally {
@@ -266,6 +287,8 @@ class _RelationScreenState extends State<RelationScreen> {
 
       if (!isColorType) {
         _scrollToLatestMessage();
+      } else {
+        await _persistUiColorForContact(selectedId, _selectedColorToSend);
       }
     } finally {
       if (mounted) {
@@ -301,6 +324,28 @@ class _RelationScreenState extends State<RelationScreen> {
     final int? rgb = int.tryParse(normalized, radix: 16);
     if (rgb == null) return null;
     return Color(0xFF000000 | rgb);
+  }
+
+  Future<void> _persistUiColorForContact(String contactId, Color color) async {
+    RelationSession? current;
+    int currentIndex = -1;
+    for (int i = 0; i < _sessions.length; i++) {
+      if (_sessions[i].myRelationCode == contactId) {
+        current = _sessions[i];
+        currentIndex = i;
+        break;
+      }
+    }
+
+    if (current == null) return;
+
+    final updated = current.copyWith(uiColorHex: _colorToHex(color));
+    await _relationStorage.upsertSession(updated);
+
+    if (!mounted) return;
+    setState(() {
+      _sessions[currentIndex] = updated;
+    });
   }
 
   // Build method:

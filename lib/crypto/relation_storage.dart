@@ -5,8 +5,7 @@ import 'package:altodevmobile/models/relation_session.dart';
 
 /// Persists relation sessions and the currently active one.
 class RelationStorage {
-  // Storage keys for relation sessions and active session
-  static const String _activeSessionKey = 'alto_relation_active_session';
+  // Storage keys for relation sessions and active relation code
   static const String _activeRelationCodeKey = 'alto_relation_active_code';
   static const String _sessionsKey = 'alto_relation_sessions';
   final FlutterSecureStorage _storage;
@@ -16,7 +15,6 @@ class RelationStorage {
   Future<void> saveActiveSession(RelationSession session) async {
     await upsertSession(session);
     await setActiveRelationCode(session.myRelationCode);
-    await _storage.write(key: _activeSessionKey, value: session.toJson());
   }
 
   Future<void> upsertSession(RelationSession session) async {
@@ -42,8 +40,7 @@ class RelationStorage {
   Future<List<RelationSession>> readAllSessions() async {
     final raw = await _storage.read(key: _sessionsKey);
     if (raw == null || raw.trim().isEmpty) {
-      final active = await _readLegacyActiveSession();
-      return active == null ? <RelationSession>[] : <RelationSession>[active];
+      return <RelationSession>[];
     }
 
     try {
@@ -82,24 +79,10 @@ class RelationStorage {
         }
       }
     }
-
-    final legacy = await _readLegacyActiveSession();
-    if (legacy != null) await saveActiveSession(legacy);
-    return legacy;
+    return null;
   }
 
   Future<void> clearActiveSession() async {
     await _storage.delete(key: _activeRelationCodeKey);
-    await _storage.delete(key: _activeSessionKey);
-  }
-
-  Future<RelationSession?> _readLegacyActiveSession() async {
-    final raw = await _storage.read(key: _activeSessionKey);
-    if (raw == null || raw.trim().isEmpty) return null;
-    try {
-      return RelationSession.fromJson(raw);
-    } catch (_) {
-      return null;
-    }
   }
 }
