@@ -25,7 +25,7 @@ Use following format: `<type>: <verb> <desc>`
 
 * Variables/functions: `camelCase` (ex.: `myFunction`, `myVariable`)
 * Classes: `PascalCase` (ex.: `MyClass`)
-* Files: `kebab-case` (ex.: `home-screen.dart`)
+* Files: `snake_case` (ex.: `home_screen.dart`)
 
 ## 4. Pull Requests procedure (PR)
 
@@ -35,3 +35,12 @@ Before submitting any changes, please follow the next steps:
 * **Testings:** the code should be compiling without any warning/error and work within an Android environment
 * **Description:** write a short but detailed description of the new implementation you will be pushing
 * **Merging:** wait for a reviewer to accept your changes before merging
+
+## 5. Do nots ❌
+
+Here's a list of things you MUST NOT do/commit:
+
+* Commit private keys to the GitHub repo
+* Log private keys into console prints
+* Send a private key through payloads
+* Store unencrypted keys into `SharedPreferences`
